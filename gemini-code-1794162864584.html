@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberArcade - Hub de Jogos Retro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neon: {
+                            cyan: '#00f3ff',
+                            pink: '#ff0055',
+                            purple: '#b000ff',
+                            yellow: '#ffea00',
+                            dark: '#0a0a12',
+                            panel: '#121220'
+                        }
+                    },
+                    boxShadow: {
+                        'neon-cyan': '0 0 15px rgba(0, 243, 255, 0.4)',
+                        'neon-pink': '0 0 15px rgba(255, 0, 85, 0.4)',
+                        'neon-purple': '0 0 15px rgba(176, 0, 255, 0.4)'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@500;700&display=swap');
+        
+        .font-arcade { font-family: 'Press Start 2P', cursive; }
+        .font-ui { font-family: 'Rajdhani', sans-serif; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0a0a12; }
+        ::-webkit-scrollbar-thumb { background: #1f1f38; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00f3ff; }
+
+        canvas {
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body class="bg-neon-dark text-slate-100 font-ui min-h-screen flex flex-col selection:bg-neon-pink selection:text-white">
+
+    <!-- Audio Manager / FX Controller (Web Audio API) -->
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            playTone(freq, type, duration, vol = 0.1) {
+                if (this.muted) return;
+                this.init();
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.00001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch(e){}
+            }
+            beep() { this.playTone(440, 'sine', 0.1, 0.05); }
+            point() { this.playTone(880, 'square', 0.15, 0.08); }
+            bonus() {
+                this.playTone(587.33, 'square', 0.1, 0.08);
+                setTimeout(() => this.playTone(880, 'square', 0.2, 0.08), 100);
+            }
+            hit() { this.playTone(120, 'sawtooth', 0.2, 0.12); }
+            win() {
+                [440, 554.37, 659.25, 880].forEach((freq, idx) => {
+                    setTimeout(() => this.playTone(freq, 'triangle', 0.2, 0.1), idx * 100);
+                });
+            }
+        }
+        const sfx = new SoundFX();
+    </script>
+
+    <!-- Header / Navbar -->
+    <header class="border-b border-slate-800 bg-neon-dark/90 backdrop-blur-md sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="switchView('dashboard')">
+                <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-neon-pink to-neon-purple flex items-center justify-center shadow-neon-pink">
+                    <span class="font-arcade text-xs text-white">CA</span>
+                </div>
+                <span class="font-arcade text-lg tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-neon-cyan via-white to-neon-pink">CYBERARCADE</span>
+            </div>
+
+            <nav class="hidden md:flex space-x-1">
+                <button onclick="switchView('dashboard')" class="px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-semibold text-slate-300 hover:text-neon-cyan transition-colors">Início</button>
+                <button onclick="openGame('snake')" class="px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-semibold text-slate-300 hover:text-neon-cyan transition-colors">Snake</button>
+                <button onclick="openGame('space')" class="px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-semibold text-slate-300 hover:text-neon-cyan transition-colors">Space Invaders</button>
+                <button onclick="openGame('tictactoe')" class="px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-semibold text-slate-300 hover:text-neon-cyan transition-colors">Jogo da Velha</button>
+                <button onclick="openGame('memory')" class="px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-semibold text-slate-300 hover:text-neon-cyan transition-colors">Memória</button>
+                <button onclick="openGame('game2048')" class="px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-semibold text-slate-300 hover:text-neon-cyan transition-colors">2048</button>
+            </nav>
+
+            <div class="flex items-center space-x-3">
+                <button onclick="sfx.muted = !sfx.muted; this.innerText = sfx.muted ? '🔇' : '🔊'" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">🔊</button>
+                <button onclick="openHostModal()" class="bg-gradient-to-r from-neon-cyan to-blue-600 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-sm hover:opacity-90 shadow-neon-cyan transition-all">Hospedar Grátis</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col justify-center">
+
+        <!-- DASHBOARD VIEW -->
+        <section id="view-dashboard" class="space-y-8">
+            <div class="text-center space-y-3 py-6">
+                <h1 class="font-arcade text-2xl md:text-4xl text-neon-cyan tracking-wide">ARENA ARCADIA</h1>
+                <p class="text-slate-400 max-w-xl mx-auto text-sm md:text-base">Escolha um dos jogos clássicos abaixo e desafie seus limites com física retro e alta performance.</p>
+            </div>
+
+            <!-- Grid de Jogos -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Snake Card -->
+                <div onclick="openGame('snake')" class="group relative bg-neon-panel border border-slate-800 rounded-2xl p-5 hover:border-neon-cyan/50 hover:shadow-neon-cyan transition-all cursor-pointer overflow-hidden flex flex-col justify-between">
+                    <div class="space-y-3">
+                        <div class="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-arcade text-xl group-hover:scale-110 transition-transform">🐍</div>
+                        <h3 class="font-arcade text-lg text-slate-100 group-hover:text-neon-cyan transition-colors">RETRO SNAKE</h3>
+                        <p class="text-slate-400 text-sm">Controle a cobra, pegue os alimentos normais e os power-ups de pontos dourados sem colidir nas paredes!</p>
+                    </div>
+                    <div class="mt-6 flex justify-between items-center text-xs font-semibold text-slate-500">
+                        <span>RECORDE: <strong id="dash-score-snake" class="text-emerald-400">0</strong></span>
+                        <span class="text-neon-cyan group-hover:translate-x-1 transition-transform">JOGAR &rarr;</span>
+                    </div>
+                </div>
+
+                <!-- Space Invaders Card -->
+                <div onclick="openGame('space')" class="group relative bg-neon-panel border border-slate-800 rounded-2xl p-5 hover:border-neon-pink/50 hover:shadow-neon-pink transition-all cursor-pointer overflow-hidden flex flex-col justify-between">
+                    <div class="space-y-3">
+                        <div class="w-12 h-12 rounded-xl bg-neon-pink/10 text-neon-pink flex items-center justify-center font-arcade text-xl group-hover:scale-110 transition-transform">👾</div>
+                        <h3 class="font-arcade text-lg text-slate-100 group-hover:text-neon-pink transition-colors">SPACE INVADERS</h3>
+                        <p class="text-slate-400 text-sm">Defenda a galáxia contra as hordas alienígenas invasoras em ondas aceleradas.</p>
+                    </div>
+                    <div class="mt-6 flex justify-between items-center text-xs font-semibold text-slate-500">
+                        <span>RECORDE: <strong id="dash-score-space" class="text-neon-pink">0</strong></span>
+                        <span class="text-neon-pink group-hover:translate-x-1 transition-transform">JOGAR &rarr;</span>
+                    </div>
+                </div>
+
+                <!-- Tic Tac Toe Card -->
+                <div onclick="openGame('tictactoe')" class="group relative bg-neon-panel border border-slate-800 rounded-2xl p-5 hover:border-neon-purple/50 hover:shadow-neon-purple transition-all cursor-pointer overflow-hidden flex flex-col justify-between">
+                    <div class="space-y-3">
+                        <div class="w-12 h-12 rounded-xl bg-neon-purple/10 text-neon-purple flex items-center justify-center font-arcade text-xl group-hover:scale-110 transition-transform">❌</div>
+                        <h3 class="font-arcade text-lg text-slate-100 group-hover:text-neon-purple transition-colors">JOGO DA VELHA</h3>
+                        <p class="text-slate-400 text-sm">Jogue contra um amigo no mesmo teclado ou desafie nossa Inteligência Artificial imbatível (Minimax).</p>
+                    </div>
+                    <div class="mt-6 flex justify-between items-center text-xs font-semibold text-slate-500">
+                        <span>MODO: <strong class="text-neon-purple">IA / 2P</strong></span>
+                        <span class="text-neon-purple group-hover:translate-x-1 transition-transform">JOGAR &rarr;</span>
+                    </div>
+                </div>
+
+                <!-- Memory Card -->
+                <div onclick="openGame('memory')" class="group relative bg-neon-panel border border-slate-800 rounded-2xl p-5 hover:border-neon-yellow/50 transition-all cursor-pointer overflow-hidden flex flex-col justify-between">
+                    <div class="space-y-3">
+                        <div class="w-12 h-12 rounded-xl bg-yellow-500/10 text-yellow-400 flex items-center justify-center font-arcade text-xl group-hover:scale-110 transition-transform">🧠</div>
+                        <h3 class="font-arcade text-lg text-slate-100 group-hover:text-yellow-400 transition-colors">MEMÓRIA CYBER</h3>
+                        <p class="text-slate-400 text-sm">Teste e exercite seu cérebro encontrando pares de ícones retrô no menor tempo possível.</p>
+                    </div>
+                    <div class="mt-6 flex justify-between items-center text-xs font-semibold text-slate-500">
+                        <span>MELHOR TEMPO: <strong id="dash-score-memory" class="text-yellow-400">--:--</strong></span>
+                        <span class="text-yellow-400 group-hover:translate-x-1 transition-transform">JOGAR &rarr;</span>
+                    </div>
+                </div>
+
+                <!-- 2048 Card -->
+                <div onclick="openGame('game2048')" class="group relative bg-neon-panel border border-slate-800 rounded-2xl p-5 hover:border-blue-500/50 transition-all cursor-pointer overflow-hidden flex flex-col justify-between">
+                    <div class="space-y-3">
+                        <div class="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-arcade text-xl group-hover:scale-110 transition-transform">🔢</div>
+                        <h3 class="font-arcade text-lg text-slate-100 group-hover:text-blue-400 transition-colors">2048 CYBER</h3>
+                        <p class="text-slate-400 text-sm">Combine os blocos numéricos idênticos até alcançar o lendário bloco 2048!</p>
+                    </div>
+                    <div class="mt-6 flex justify-between items-center text-xs font-semibold text-slate-500">
+                        <span>RECORDE: <strong id="dash-score-game2048" class="text-blue-400">0</strong></span>
+                        <span class="text-blue-400 group-hover:translate-x-1 transition-transform">JOGAR &rarr;</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- GAME CONTAINER VIEW -->
+        <section id="view-game" class="hidden flex-col items-center space-y-4">
+            <!-- Barra Superior do Jogo -->
+            <div class="w-full max-w-2xl flex justify-between items-center bg-neon-panel border border-slate-800 rounded-xl px-4 py-3">
+                <button onclick="switchView('dashboard')" class="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-sm font-semibold">
+                    <span>&larr; Voltar ao Menu</span>
+                </button>
+                <h2 id="game-title" class="font-arcade text-sm md:text-base text-neon-cyan">GAME TITLE</h2>
+                <div class="text-right">
+                    <div class="text-xs text-slate-400">PONTOS</div>
+                    <div id="game-score" class="font-arcade text-neon-pink text-base">0</div>
+                </div>
+            </div>
+
+            <!-- Display do Jogo -->
+            <div class="w-full max-w-2xl bg-neon-panel border border-slate-800 rounded-2xl p-4 md:p-6 flex flex-col items-center justify-center min-h-[420px] relative overflow-hidden">
+                <!-- Telas Específicas -->
+                <div id="holder-snake" class="hidden flex-col items-center">
+                    <canvas id="snakeCanvas" width="400" height="400" class="border border-slate-700 rounded-lg bg-slate-950 max-w-full"></canvas>
+                    <div class="mt-4 flex gap-2 sm:hidden">
+                        <button onclick="snakeDir('UP')" class="bg-slate-800 px-4 py-2 rounded text-xl">⬆️</button>
+                        <button onclick="snakeDir('DOWN')" class="bg-slate-800 px-4 py-2 rounded text-xl">⬇️</button>
+                        <button onclick="snakeDir('LEFT')" class="bg-slate-800 px-4 py-2 rounded text-xl">⬅️</button>
+                        <button onclick="snakeDir('RIGHT')" class="bg-slate-800 px-4 py-2 rounded text-xl">➡️</button>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">Use as setas do teclado para mover.</p>
+                </div>
+
+                <div id="holder-space" class="hidden flex-col items-center">
+                    <canvas id="spaceCanvas" width="440" height="400" class="border border-slate-700 rounded-lg bg-slate-950 max-w-full"></canvas>
+                    <p class="text-xs text-slate-500 mt-2">Controles: Setas ⬅️ ➡️ para mover | Barra de Espaço para atirar.</p>
+                </div>
+
+                <div id="holder-tictactoe" class="hidden flex-col items-center">
+                    <div class="mb-4 flex gap-3">
+                        <button id="ttt-mode-ai" onclick="setTTTMode('ai')" class="px-3 py-1 rounded bg-neon-purple text-white text-xs font-bold">VS IA</button>
+                        <button id="ttt-mode-2p" onclick="setTTTMode('2p')" class="px-3 py-1 rounded bg-slate-800 text-slate-400 text-xs font-bold">2 Jogadores</button>
+                    </div>
+                    <div id="ttt-grid" class="grid grid-cols-3 gap-3 w-64 h-64"></div>
+                    <div id="ttt-status" class="mt-4 font-arcade text-xs text-neon-cyan h-4"></div>
+                </div>
+
+                <div id="holder-memory" class="hidden flex-col items-center">
+                    <div id="memory-grid" class="grid grid-cols-4 gap-3"></div>
+                </div>
+
+                <div id="holder-game2048" class="hidden flex-col items-center">
+                    <div id="g2048-grid" class="grid grid-cols-4 gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800"></div>
+                    <p class="text-xs text-slate-500 mt-3">Use as setas do teclado para deslizar os blocos.</p>
+                </div>
+
+                <!-- Game Over Overlay -->
+                <div id="game-over-overlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-sm hidden flex-col items-center justify-center p-6 text-center z-20">
+                    <h3 class="font-arcade text-2xl text-neon-pink mb-2">GAME OVER</h3>
+                    <p id="game-over-reason" class="text-slate-300 text-sm mb-6">Sua pontuação final: <span id="final-score" class="text-neon-cyan font-bold">0</span></p>
+                    <button onclick="restartCurrentGame()" class="bg-gradient-to-r from-neon-cyan to-blue-600 text-slate-950 font-arcade text-xs px-6 py-3 rounded-lg hover:opacity-90 transition-all shadow-neon-cyan">TENTAR NOVAMENTE</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal de Hospedagem -->
+    <div id="host-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-neon-panel border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-6 relative max-h-[90vh] overflow-y-auto">
+            <button onclick="closeHostModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
+            <h3 class="font-arcade text-lg text-neon-cyan">🚀 Publicar no GitHub Pages</h3>
+            <ol class="space-y-4 text-sm text-slate-300 list-decimal list-inside">
+                <li>Salve todo este código em um arquivo local com o nome <strong>index.html</strong>.</li>
+                <li>Acesse o <a href="https://github.com" target="_blank" class="text-neon-pink underline">GitHub.com</a> e crie um novo repositório público.</li>
+                <li>Envie (upload) o arquivo <strong>index.html</strong> para a raiz do repositório.</li>
+                <li>Vá em <strong>Settings</strong> &gt; <strong>Pages</strong>.</li>
+                <li>Em <em>Source</em>, selecione a branch <strong>main</strong> (ou master) e clique em <strong>Save</strong>.</li>
+                <li>Em 1 minuto seu site estará online no link fornecido pelo GitHub!</li>
+            </ol>
+            <div class="pt-2">
+                <button onclick="closeHostModal()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-lg text-sm">Entendido!</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Principal dos Jogos -->
+    <script>
+        // State Global
+        let currentGame = null;
+        let gameInterval = null;
+        const scores = {
+            snake: localStorage.getItem('score_snake') || 0,
+            space: localStorage.getItem('score_space') || 0,
+            memory: localStorage.getItem('score_memory') || null,
+            game2048: localStorage.getItem('score_2048') || 0
+        };
+
+        function updateDashScores() {
+            document.getElementById('dash-score-snake').innerText = scores.snake;
+            document.getElementById('dash-score-space').innerText = scores.space;
+            document.getElementById('dash-score-memory').innerText = scores.memory ? scores.memory + 's' : '--:--';
+            document.getElementById('dash-score-game2048').innerText = scores.game2048;
+        }
+        updateDashScores();
+
+        function switchView(view) {
+            sfx.beep();
+            clearInterval(gameInterval);
+            document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
+            document.getElementById('view-game').classList.toggle('hidden', view !== 'game');
+            if(view === 'dashboard') updateDashScores();
+        }
+
+        function openGame(gameKey) {
+            currentGame = gameKey;
+            switchView('game');
+            document.getElementById('game-over-overlay').classList.add('hidden');
+            
+            // Oculta todos os holders
+            ['snake', 'space', 'tictactoe', 'memory', 'game2048'].forEach(id => {
+                document.getElementById(`holder-${id}`).classList.add('hidden');
+            });
+
+            document.getElementById(`holder-${gameKey}`).classList.remove('hidden');
+
+            const titles = {
+                snake: 'RETRO SNAKE',
+                space: 'SPACE INVADERS',
+                tictactoe: 'JOGO DA VELHA',
+                memory: 'MEMÓRIA CYBER',
+                game2048: '2048 CYBER'
+            };
+            document.getElementById('game-title').innerText = titles[gameKey];
+            document.getElementById('game-score').innerText = '0';
+
+            // Start Game
+            if(gameKey === 'snake') initSnake();
+            if(gameKey === 'space') initSpace();
+            if(gameKey === 'tictactoe') initTicTacToe();
+            if(gameKey === 'memory') initMemory();
+            if(gameKey === 'game2048') init2048();
+        }
+
+        function triggerGameOver(score, reason = "") {
+            sfx.hit();
+            clearInterval(gameInterval);
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('game-over-reason').innerText = reason || `Pontuação final: ${score}`;
+            document.getElementById('game-over-overlay').classList.remove('hidden');
+
+            if(currentGame === 'snake' && score > scores.snake) {
+                scores.snake = score;
+                localStorage.setItem('score_snake', score);
+            }
+            if(currentGame === 'space' && score > scores.space) {
+                scores.space = score;
+                localStorage.setItem('score_space', score);
+            }
+            if(currentGame === 'game2048' && score > scores.game2048) {
+                scores.game2048 = score;
+                localStorage.setItem('score_2048', score);
+            }
+        }
+
+        function restartCurrentGame() {
+            openGame(currentGame);
+        }
+
+        function openHostModal() { document.getElementById('host-modal').classList.remove('hidden'); }
+        function closeHostModal() { document.getElementById('host-modal').classList.add('hidden'); }
+
+        // ==========================================
+        // 1. SNAKE GAME
+        // ==========================================
+        let snake, snakeDirCurrent, food, powerUp, snakeScore;
+        function initSnake() {
+            const canvas = document.getElementById('snakeCanvas');
+            const ctx = canvas.getContext('2d');
+            const box = 20;
+            snake = [{x: 9 * box, y: 10 * box}];
+            snakeDirCurrent = 'RIGHT';
+            snakeScore = 0;
+            spawnFood();
+            powerUp = null;
+
+            document.onkeydown = (e) => {
+                if(e.key === 'ArrowLeft' && snakeDirCurrent !== 'RIGHT') snakeDirCurrent = 'LEFT';
+                else if(e.key === 'ArrowUp' && snakeDirCurrent !== 'DOWN') snakeDirCurrent = 'UP';
+                else if(e.key === 'ArrowRight' && snakeDirCurrent !== 'LEFT') snakeDirCurrent = 'RIGHT';
+                else if(e.key === 'ArrowDown' && snakeDirCurrent !== 'UP') snakeDirCurrent = 'DOWN';
+            };
+
+            function spawnFood() {
+                food = {
+                    x: Math.floor(Math.random() * 19 + 1) * box,
+                    y: Math.floor(Math.random() * 19 + 1) * box
+                };
+            }
+
+            function spawnPowerUp() {
+                if(Math.random() < 0.3 && !powerUp) {
+                    powerUp = {
+                        x: Math.floor(Math.random() * 19 + 1) * box,
+                        y: Math.floor(Math.random() * 19 + 1) * box
+                    };
+                }
+            }
+
+            clearInterval(gameInterval);
+            gameInterval = setInterval(() => {
+                let snakeX = snake[0].x;
+                let snakeY = snake[0].y;
+
+                if(snakeDirCurrent === 'LEFT') snakeX -= box;
+                if(snakeDirCurrent === 'UP') snakeY -= box;
+                if(snakeDirCurrent === 'RIGHT') snakeX += box;
+                if(snakeDirCurrent === 'DOWN') snakeY += box;
+
+                // Colisão com comida normal
+                if(snakeX === food.x && snakeY === food.y) {
+                    snakeScore += 10;
+                    sfx.point();
+                    document.getElementById('game-score').innerText = snakeScore;
+                    spawnFood();
+                    spawnPowerUp();
+                } else if(powerUp && snakeX === powerUp.x && snakeY === powerUp.y) {
+                    snakeScore += 50;
+                    sfx.bonus();
+                    document.getElementById('game-score').innerText = snakeScore;
+                    powerUp = null;
+                } else {
+                    snake.pop();
+                }
+
+                let newHead = {x: snakeX, y: snakeY};
+
+                // Game Over Rules
+                if(snakeX < 0 || snakeX >= canvas.width || snakeY < 0 || snakeY >= canvas.height || collision(newHead, snake)) {
+                    triggerGameOver(snakeScore, "Você bateu na parede ou no próprio corpo!");
+                    return;
+                }
+
+                snake.unshift(newHead);
+
+                // Render
+                ctx.fillStyle = '#0a0a12';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                for(let i = 0; i < snake.length; i++) {
+                    ctx.fillStyle = (i === 0) ? '#00f3ff' : '#059669';
+                    ctx.fillRect(snake[i].x, snake[i].y, box - 1, box - 1);
+                }
+
+                // Food
+                ctx.fillStyle = '#ff0055';
+                ctx.fillRect(food.x, food.y, box - 1, box - 1);
+
+                // PowerUp
+                if(powerUp) {
+                    ctx.fillStyle = '#ffea00';
+                    ctx.fillRect(powerUp.x, powerUp.y, box - 1, box - 1);
+                }
+            }, 100);
+        }
+
+        function collision(head, array) {
+            return array.some(part => head.x === part.x && head.y === part.y);
+        }
+
+        function snakeDir(dir) {
+            if(dir === 'LEFT' && snakeDirCurrent !== 'RIGHT') snakeDirCurrent = 'LEFT';
+            if(dir === 'UP' && snakeDirCurrent !== 'DOWN') snakeDirCurrent = 'UP';
+            if(dir === 'RIGHT' && snakeDirCurrent !== 'LEFT') snakeDirCurrent = 'RIGHT';
+            if(dir === 'DOWN' && snakeDirCurrent !== 'UP') snakeDirCurrent = 'DOWN';
+        }
+
+        // ==========================================
+        // 2. SPACE INVADERS
+        // ==========================================
+        function initSpace() {
+            const canvas = document.getElementById('spaceCanvas');
+            const ctx = canvas.getContext('2d');
+            let player = { x: canvas.width / 2 - 15, y: canvas.height - 30, width: 30, height: 15 };
+            let bullets = [];
+            let enemies = [];
+            let spaceScore = 0;
+            let keys = {};
+
+            for(let r = 0; r < 3; r++) {
+                for(let c = 0; c < 7; c++) {
+                    enemies.push({ x: 35 + c * 50, y: 30 + r * 35, width: 30, height: 20, alive: true });
+                }
+            }
+
+            document.onkeydown = (e) => { keys[e.key] = true; };
+            document.onkeyup = (e) => { 
+                if(e.key === ' ' && keys[' ']) {
+                    bullets.push({ x: player.x + player.width / 2 - 2, y: player.y, width: 4, height: 10 });
+                    sfx.beep();
+                }
+                keys[e.key] = false; 
+            };
+
+            clearInterval(gameInterval);
+            gameInterval = setInterval(() => {
+                if(keys['ArrowLeft'] && player.x > 0) player.x -= 5;
+                if(keys['ArrowRight'] && player.x < canvas.width - player.width) player.x += 5;
+
+                // Move Bullets
+                bullets.forEach(b => b.y -= 7);
+                bullets = bullets.filter(b => b.y > 0);
+
+                // Check Colisions
+                bullets.forEach(b => {
+                    enemies.forEach(e => {
+                        if(e.alive && b.x < e.x + e.width && b.x + b.width > e.x && b.y < e.y + e.height && b.y + b.height > e.y) {
+                            e.alive = false;
+                            b.y = -10;
+                            spaceScore += 20;
+                            sfx.point();
+                            document.getElementById('game-score').innerText = spaceScore;
+                        }
+                    });
+                });
+
+                // Render
+                ctx.fillStyle = '#0a0a12';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Draw Player
+                ctx.fillStyle = '#00f3ff';
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+
+                // Draw Bullets
+                ctx.fillStyle = '#ffea00';
+                bullets.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+
+                // Draw Enemies
+                let remainingEnemies = 0;
+                enemies.forEach(e => {
+                    if(e.alive) {
+                        remainingEnemies++;
+                        ctx.fillStyle = '#ff0055';
+                        ctx.fillRect(e.x, e.y, e.width, e.height);
+                    }
+                });
+
+                if(remainingEnemies === 0) {
+                    triggerGameOver(spaceScore, "Parabéns! Você destruiu toda a frota alienígena!");
+                }
+            }, 1000 / 30);
+        }
+
+        // ==========================================
+        // 3. JOGO DA VELHA (TIC TAC TOE) + AI MINIMAX
+        // ==========================================
+        let tttBoard, tttTurn, tttMode = 'ai';
+        function setTTTMode(mode) {
+            tttMode = mode;
+            document.getElementById('ttt-mode-ai').className = mode === 'ai' ? 'px-3 py-1 rounded bg-neon-purple text-white text-xs font-bold' : 'px-3 py-1 rounded bg-slate-800 text-slate-400 text-xs font-bold';
+            document.getElementById('ttt-mode-2p').className = mode === '2p' ? 'px-3 py-1 rounded bg-neon-purple text-white text-xs font-bold' : 'px-3 py-1 rounded bg-slate-800 text-slate-400 text-xs font-bold';
+            initTicTacToe();
+        }
+
+        function initTicTacToe() {
+            tttBoard = Array(9).fill(null);
+            tttTurn = 'X';
+            document.getElementById('ttt-status').innerText = "Sua vez (X)";
+            renderTTT();
+        }
+
+        function renderTTT() {
+            const grid = document.getElementById('ttt-grid');
+            grid.innerHTML = '';
+            tttBoard.forEach((val, idx) => {
+                const btn = document.createElement('button');
+                btn.className = `w-full h-full bg-slate-900 border border-slate-700 rounded-xl font-arcade text-xl flex items-center justify-center transition-all ${!val ? 'hover:border-neon-purple' : ''}`;
+                btn.innerText = val || '';
+                btn.classList.add(val === 'X' ? 'text-neon-cyan' : 'text-neon-pink');
+                btn.onclick = () => makeTTTMove(idx);
+                grid.appendChild(btn);
+            });
+        }
+
+        function makeTTTMove(idx) {
+            if(tttBoard[idx] || checkTTTWin(tttBoard)) return;
+            tttBoard[idx] = tttTurn;
+            sfx.beep();
+            renderTTT();
+
+            if(checkTTTWin(tttBoard)) {
+                document.getElementById('ttt-status').innerText = `Jogador ${tttTurn} Venceu! 🎉`;
+                sfx.win();
+                return;
+            } else if(tttBoard.every(cell => cell !== null)) {
+                document.getElementById('ttt-status').innerText = "Empate!";
+                return;
+            }
+
+            tttTurn = tttTurn === 'X' ? 'O' : 'X';
+            document.getElementById('ttt-status').innerText = `Vez de (${tttTurn})`;
+
+            if(tttMode === 'ai' && tttTurn === 'O') {
+                setTimeout(makeAIMove, 300);
+            }
+        }
+
+        function makeAIMove() {
+            let bestScore = -Infinity;
+            let move;
+            for(let i = 0; i < 9; i++) {
+                if(!tttBoard[i]) {
+                    tttBoard[i] = 'O';
+                    let score = minimax(tttBoard, 0, false);
+                    tttBoard[i] = null;
+                    if(score > bestScore) {
+                        bestScore = score;
+                        move = i;
+                    }
+                }
+            }
+            if(move !== undefined) makeTTTMove(move);
+        }
+
+        function minimax(board, depth, isMaximizing) {
+            let winner = checkTTTWin(board);
+            if(winner === 'O') return 10 - depth;
+            if(winner === 'X') return depth - 10;
+            if(board.every(cell => cell !== null)) return 0;
+
+            if(isMaximizing) {
+                let bestScore = -Infinity;
+                for(let i = 0; i < 9; i++) {
+                    if(!board[i]) {
+                        board[i] = 'O';
+                        let score = minimax(board, depth + 1, false);
+                        board[i] = null;
+                        bestScore = Math.max(score, bestScore);
+                    }
+                }
+                return bestScore;
+            } else {
+                let bestScore = Infinity;
+                for(let i = 0; i < 9; i++) {
+                    if(!board[i]) {
+                        board[i] = 'X';
+                        let score = minimax(board, depth + 1, true);
+                        board[i] = null;
+                        bestScore = Math.min(score, bestScore);
+                    }
+                }
+                return bestScore;
+            }
+        }
+
+        function checkTTTWin(b) {
+            const lines = [
+                [0,1,2],[3,4,5],[6,7,8],
+                [0,3,6],[1,4,7],[2,5,8],
+                [0,4,8],[2,4,6]
+            ];
+            for(let l of lines) {
+                if(b[l[0]] && b[l[0]] === b[l[1]] && b[l[0]] === b[l[2]]) return b[l[0]];
+            }
+            return null;
+        }
+
+        // ==========================================
+        // 4. JOGO DA MEMÓRIA
+        // ==========================================
+        let memCards = [], memFlipped = [], memMatched = [], memStartTime;
+        function initMemory() {
+            const icons = ['🚀','👾','🎮','🕹️','⚡','🔥','💎','🔮'];
+            const deck = [...icons, ...icons].sort(() => Math.random() - 0.5);
+            memCards = deck;
+            memFlipped = [];
+            memMatched = [];
+            memStartTime = Date.now();
+            renderMemory();
+        }
+
+        function renderMemory() {
+            const grid = document.getElementById('memory-grid');
+            grid.innerHTML = '';
+            memCards.forEach((icon, idx) => {
+                const card = document.createElement('div');
+                const isFlipped = memFlipped.includes(idx) || memMatched.includes(idx);
+                card.className = `w-16 h-16 sm:w-20 sm:h-20 bg-slate-900 border ${isFlipped ? 'border-yellow-400 bg-slate-800' : 'border-slate-700'} rounded-xl flex items-center justify-center text-2xl cursor-pointer transition-all select-none`;
+                card.innerText = isFlipped ? icon : '❓';
+                card.onclick = () => flipMemoryCard(idx);
+                grid.appendChild(card);
+            });
+        }
+
+        function flipMemoryCard(idx) {
+            if(memFlipped.length === 2 || memFlipped.includes(idx) || memMatched.includes(idx)) return;
+            memFlipped.push(idx);
+            sfx.beep();
+            renderMemory();
+
+            if(memFlipped.length === 2) {
+                const [first, second] = memFlipped;
+                if(memCards[first] === memCards[second]) {
+                    memMatched.push(first, second);
+                    memFlipped = [];
+                    sfx.point();
+                    renderMemory();
+                    if(memMatched.length === memCards.length) {
+                        const elapsed = Math.floor((Date.now() - memStartTime) / 1000);
+                        sfx.win();
+                        if(!scores.memory || elapsed < scores.memory) {
+                            scores.memory = elapsed;
+                            localStorage.setItem('score_memory', elapsed);
+                        }
+                        triggerGameOver(elapsed, `Você completou o jogo da memória em ${elapsed} segundos!`);
+                    }
+                } else {
+                    setTimeout(() => {
+                        memFlipped = [];
+                        renderMemory();
+                    }, 800);
+                }
+            }
+        }
+
+        // ==========================================
+        // 5. JOGO 2048
+        // ==========================================
+        let g2048Grid, g2048Score;
+        function init2048() {
+            g2048Grid = Array(4).fill(null).map(() => Array(4).fill(0));
+            g2048Score = 0;
+            add2048Tile();
+            add2048Tile();
+            render2048();
+
+            document.onkeydown = (e) => {
+                if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+                    move2048(e.key);
+                }
+            };
+        }
+
+        function add2048Tile() {
+            let empty = [];
+            for(let r=0; r<4; r++) {
+                for(let c=0; c<4; c++) {
+                    if(g2048Grid[r][c] === 0) empty.push({r, c});
+                }
+            }
+            if(empty.length > 0) {
+                let {r, c} = empty[Math.floor(Math.random() * empty.length)];
+                g2048Grid[r][c] = Math.random() < 0.9 ? 2 : 4;
+            }
+        }
+
+        function render2048() {
+            const grid = document.getElementById('g2048-grid');
+            grid.innerHTML = '';
+            for(let r=0; r<4; r++) {
+                for(let c=0; c<4; c++) {
+                    let val = g2048Grid[r][c];
+                    let tile = document.createElement('div');
+                    tile.className = `w-14 h-14 sm:w-16 sm:h-16 rounded-lg font-arcade text-xs sm:text-sm flex items-center justify-center font-bold transition-all ${get2048Color(val)}`;
+                    tile.innerText = val > 0 ? val : '';
+                    grid.appendChild(tile);
+                }
+            }
+            document.getElementById('game-score').innerText = g2048Score;
+        }
+
+        function get2048Color(val) {
+            switch(val) {
+                case 2: return 'bg-slate-800 text-slate-200';
+                case 4: return 'bg-slate-700 text-slate-100';
+                case 8: return 'bg-orange-600 text-white';
+                case 16: return 'bg-orange-500 text-white';
+                case 32: return 'bg-red-600 text-white';
+                case 64: return 'bg-red-500 text-white';
+                case 128: return 'bg-yellow-600 text-white shadow-neon-yellow';
+                case 256: return 'bg-yellow-500 text-white shadow-neon-yellow';
+                case 512: return 'bg-emerald-600 text-white';
+                case 1024: return 'bg-neon-cyan text-slate-950 font-bold';
+                case 2048: return 'bg-neon-pink text-white font-bold shadow-neon-pink';
+                default: return 'bg-slate-950/50 text-transparent';
+            }
+        }
+
+        function move2048(dir) {
+            let moved = false;
+            // Lógica genérica de deslizamento
+            if(dir === 'ArrowLeft') moved = slide2048Left();
+            if(dir === 'ArrowRight') { rotate2048(); rotate2048(); moved = slide2048Left(); rotate2048(); rotate2048(); }
+            if(dir === 'ArrowUp') { rotate2048(); rotate2048(); rotate2048(); moved = slide2048Left(); rotate2048(); }
+            if(dir === 'ArrowDown') { rotate2048(); moved = slide2048Left(); rotate2048(); rotate2048(); rotate2048(); }
+
+            if(moved) {
+                sfx.beep();
+                add2048Tile();
+                render2048();
+            }
+        }
+
+        function slide2048Left() {
+            let moved = false;
+            for(let r=0; r<4; r++) {
+                let row = g2048Grid[r].filter(v => v !== 0);
+                for(let c=0; c<row.length-1; c++) {
+                    if(row[c] === row[c+1]) {
+                        row[c] *= 2;
+                        g2048Score += row[c];
+                        row.splice(c+1, 1);
+                        moved = true;
+                    }
+                }
+                while(row.length < 4) row.push(0);
+                if(JSON.stringify(g2048Grid[r]) !== JSON.stringify(row)) moved = true;
+                g2048Grid[r] = row;
+            }
+            return moved;
+        }
+
+        function rotate2048() {
+            let N = 4;
+            let res = Array(N).fill(null).map(() => Array(N).fill(0));
+            for(let r=0; r<N; r++) {
+                for(let c=0; c<N; c++) {
+                    res[c][N-1-r] = g2048Grid[r][c];
+                }
+            }
+            g2048Grid = res;
+        }
+    </script>
+</body>
+</html>
